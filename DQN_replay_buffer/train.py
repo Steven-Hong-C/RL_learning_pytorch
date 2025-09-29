@@ -3,10 +3,12 @@ from matplotlib import pyplot as plt
 import torch
 import module
 import agents
+import replay_buffer
+import copy
 
 
 class TrainManager():
-    def __init__(self, env, episodes=100, lr=0.01, gamma=0.9, epsilon=0.1, agent=0):
+    def __init__(self, env, episodes=200, lr=0.001, gamma=0.9, epsilon=0.1, memory_size = 2000, replay_start_size = 40, batch_size = 32,num_of_steps = 4):
         self.env = env
         self.episodes = episodes
 
@@ -14,29 +16,31 @@ class TrainManager():
         n_actions = env.action_space.n
         q_fun = module.DQN(n_obs, n_actions)
         optimizer = torch.optim.Adam(q_fun.parameters(), lr=lr) #声明优化器
-        if agent != 0:          #如果从外界传来了一个agent,那就直接用外界传来的agent就行
-            self.agent = agent
-        else:
-            self.agent = agents.DQNAgent(
-                q_fun = q_fun,
-                optimizer = optimizer,
-                gamma = gamma,
-                epsilon = epsilon,
-                n_action = n_actions
-            )
+        rb = replay_buffer.ReplayBuffer(memory_size,num_of_steps)
+
+        self.agent = agents.DQNAgent(
+            q_fun = q_fun,
+            optimizer = optimizer,
+            replay_start_size = replay_start_size,
+            replay_buffer = rb,
+            batch_size = batch_size,
+            gamma = gamma,
+            epsilon = epsilon,
+            n_action = n_actions,
+            num_of_steps = num_of_steps
+        )
         #self.best_agent = self.agent
 
 
     def train_episode(self):
         total_reward = 0    #记录总的奖励
         obs = self.env.reset()[0]
-        obs = torch.FloatTensor(obs) #转换成torch张量形式
-
+        #obs = torch.FloatTensor(obs) #转换成torch张量形式
         while True:
             action = self.agent.choose_action(obs)
             next_obs, reward, terminated, truncated, info = self.env.step(action) #下一个状态
-            next_obs = torch.FloatTensor(next_obs)
-            #next_action = self.agent.choose_action(next_obs)   #根据下一个状态和Q值选择下一个动作
+            #next_obs = torch.FloatTensor(next_obs)
+
             done = terminated or truncated
             self.agent.learn(obs, action, reward, next_obs, done)     #只用terminated试一试
             total_reward += reward
@@ -46,15 +50,15 @@ class TrainManager():
                 break
         return total_reward #返回训练一次的总奖励
 
-    def test_episode(self):
+    def test_episode(self,agent):
         total_reward = 0  # 记录总的奖励
         obs = self.env.reset()[0]
-        obs = torch.from_numpy(obs).float()  # 转换成torch张量形式
+        #obs = torch.FloatTensor(obs)  # 转换成torch张量形式
 
         while True:
-            action = self.agent.predict(obs)       #测试时，使用最好的agent进行测试
+            action = agent.predict(obs)       #测试时，使用最好的agent进行测试
             next_obs, reward, terminated, truncated, _ = self.env.step(action)  # 下一个状态
-            next_obs = torch.FloatTensor(next_obs)
+            #next_obs = torch.FloatTensor(next_obs)
             #next_action = self.agent.predict(next_obs)  # 根据下一个状态和Q值选择下一个动作
             done = terminated or truncated
             #agent.learn(state, action, reward, next_state, next_action, done)  # 只用terminated试一试
@@ -73,7 +77,7 @@ class TrainManager():
             ep_reward = self.train_episode()   #训练一次的总奖励
             if ep_reward > best_reward:
                 best_reward = ep_reward
-                self.best_agent = self.agent
+                best_agent = self.agent
             print("Episode: {}, Reward: {}".format(e, ep_reward))
             reward_list.append(ep_reward)
 
@@ -82,17 +86,23 @@ class TrainManager():
         plt.plot(reward_list)
         plt.show()
         #训练结束，测试一次
-
+        print("Best Reward: {}".format(best_reward))
+        #print("Best Agent: {}".format(best_agent))
         return best_agent
 
-    def test(self):
-        test_reward = self.test_episode()
+    def test(self,agent):
+        test_reward = self.test_episode(agent)
         return test_reward
 
 
 if __name__ == '__main__':
-    env1 = gym.make("CartPole-v1", render_mode="human")
+    env1 = gym.make("CartPole-v1", render_mode="rgb_array")
     tm = TrainManager(env1)
     best_agent = tm.train()
+    #print('传入的最佳agent的地址为：',best_agent)
+
     env2 = gym.make("CartPole-v1", render_mode="human")
-    tm = TrainManager(env2,best_agent)
+    tm2 = TrainManager(env2)
+    #print('接收到的最佳agent的地址为：',tm.agent)
+    test_reward = tm2.test(best_agent)
+    print(test_reward)
